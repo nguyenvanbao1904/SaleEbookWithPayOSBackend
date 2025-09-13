@@ -6,5 +6,6 @@ RUN mvn clean package
 FROM openjdk:21
 WORKDIR /app
 COPY --from=build /app/target/backend-1.0-SNAPSHOT-jar-with-dependencies.jar app.jar
+COPY data ./data
 EXPOSE 3030
 CMD ["java", "-jar", "app.jar"]

@@ -1,10 +1,6 @@
-import java.io.FileWriter;
-import java.nio.file.Files;
-import java.nio.file.Paths;
-import java.util.HashMap;
-import java.util.Map;
-
 import com.google.gson.Gson;
+import model.Book;
+import service.BookService;
 import spark.ModelAndView;
 import spark.template.mustache.MustacheTemplateEngine;
 import vn.payos.PayOS;
@@ -12,128 +8,96 @@ import vn.payos.type.CheckoutResponseData;
 import vn.payos.type.ItemData;
 import vn.payos.type.PaymentData;
 
+import java.util.Map;
+
 import static spark.Spark.*;
 
 public class Server {
-    static String DATA_FILE = "public/data/ebook-data.json";
-    static Gson gson = new Gson();
     public static void main(String[] args) {
         port(3030);
-        staticFiles.location("/public");
+        BookService bookService = new BookService();
+
         String clientId = System.getenv("PAYOS_CLIENT_ID");
         String apiKey = System.getenv("PAYOS_API_KEY");
         String checksumKey = System.getenv("PAYOS_CHECKSUM_KEY");
+        PayOS payOS = new PayOS(clientId, apiKey, checksumKey);
 
-        options("/*", (request, response) -> {
-            String accessControlRequestHeaders = request.headers("Access-Control-Request-Headers");
-            if (accessControlRequestHeaders != null) {
-                response.header("Access-Control-Allow-Headers", accessControlRequestHeaders);
-            }
-
-            String accessControlRequestMethod = request.headers("Access-Control-Request-Method");
-            if (accessControlRequestMethod != null) {
-                response.header("Access-Control-Allow-Methods", accessControlRequestMethod);
-            }
-
-            return "OK";
+        before((req, res) -> {
+            res.header("Access-Control-Allow-Origin", "http://localhost:3000");
+            res.header("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
+            res.header("Access-Control-Allow-Headers", "Content-Type,Authorization");
         });
-
-        before((request, response) -> {
-            response.header("Access-Control-Allow-Origin", "http://localhost:3000"); // chỉ cho FE
-            response.header("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
-            response.header("Access-Control-Allow-Headers", "Content-Type,Authorization");
-        });
-        final PayOS payOS = new PayOS(clientId, apiKey, checksumKey);
 
         post("/create-payment-link", (req, res) -> {
-            String domain = "http://localhost:3000";
             Long orderCode = System.currentTimeMillis() / 1000;
             int quantity = Integer.parseInt(req.queryParams("quantity"));
             int price = Integer.parseInt(req.queryParams("price"));
 
-            ItemData itemData = ItemData
-                    .builder()
+            ItemData item = ItemData.builder()
                     .name(req.queryParams("name"))
                     .quantity(quantity)
                     .price(price)
                     .build();
 
-            PaymentData paymentData = PaymentData
-                    .builder()
+            PaymentData payment = PaymentData.builder()
                     .orderCode(orderCode)
                     .amount(quantity * price)
                     .description("Thanh toán đơn hàng")
-                    .returnUrl(domain + "/success.html")
-                    .cancelUrl(domain + "/cancel.html")
-                    .item(itemData)
+                    .returnUrl("http://localhost:3000/success.html")
+                    .cancelUrl("http://localhost:3000/cancel.html")
+                    .item(item)
                     .build();
 
-            CheckoutResponseData result = payOS.createPaymentLink(paymentData);
+            CheckoutResponseData result = payOS.createPaymentLink(payment);
             res.redirect(result.getCheckoutUrl(), 303);
             return "";
         });
 
+        // Trang admin
         get("/admin", (req, res) -> {
-            Map<String, Object> model = new HashMap<>();
-            String json = new String(Files.readAllBytes(Paths.get(DATA_FILE)));
-            model.put("book", gson.fromJson(json, Map.class));
-            return new ModelAndView(model, "admin-page.mustache");
+            Book book = bookService.readBook();
+            return new ModelAndView(Map.of("book", book), "admin-page.mustache");
         }, new MustacheTemplateEngine());
 
-        post("/admin/update", (req, res) ->{
-            String name =  req.queryParams("name");
-            String description =  req.queryParams("description");
-            double price = Double.parseDouble(req.queryParams("price"));
-            String image = req.queryParams("image");
-            Book book = new Book(name, description, price, image);
-            try (FileWriter writer = new FileWriter(DATA_FILE)) {
-                gson.toJson(book, writer);
-            }
-            res.type("text/html");
+        // Cập nhật sách
+        post("/admin/update", (req, res) -> {
+            Book book = new Book(
+                    req.queryParams("name"),
+                    req.queryParams("description"),
+                    Double.parseDouble(req.queryParams("price")),
+                    req.queryParams("image")
+            );
+            bookService.updateBook(book);
             return "<h1>Update Success</h1><a href='/admin'>Go back</a>";
         });
 
+        // Lấy dữ liệu sách dạng JSON
         get("/book-data", (req, res) -> {
             res.type("application/json");
-            String json = new String(Files.readAllBytes(Paths.get(DATA_FILE)));
-            return json;
+            Book book = bookService.readBook();
+            return new Gson().toJson(book);
         });
 
+
+        // Download PDF, chỉ khi thanh toán thành công
         get("/download", (req, res) -> {
-            String orderCode = req.queryParams("orderCode");
-            System.out.println("Người dùng tải file với orderCode: " + orderCode);
+            boolean isPaid = "true".equals(req.queryParams("paid"));
+            if (!isPaid) {
+                res.status(403);
+                return "Bạn chưa thanh toán, không thể tải PDF";
+            }
 
             res.type("application/pdf");
             res.header("Content-Disposition", "attachment; filename=ebook.pdf");
-
-            byte[] fileBytes = Files.readAllBytes(Paths.get("public/data/ebook.pdf"));
-            res.raw().getOutputStream().write(fileBytes);
-            res.raw().getOutputStream().flush();
-            res.raw().getOutputStream().close();
-
+            res.raw().getOutputStream().write(bookService.getPdfBytes());
             return res.raw();
         });
 
+        // Webhook PayOS
         post("/webhook", (req, res) -> {
-            res.type("application/json");
-            Map<String, String> requestBody = gson.fromJson(req.body(), Map.class);
-
-            Map<String, Object> response = new HashMap<>();
-            try {
-                String webhookUrl = requestBody.get("webhookUrl");
-                String result = payOS.confirmWebhook(webhookUrl);
-
-                response.put("data", result);
-                response.put("error", 0);
-                response.put("message", "ok");
-            } catch (Exception e) {
-                e.printStackTrace();
-                response.put("error", -1);
-                response.put("message", e.getMessage());
-                response.put("data", null);
-            }
-            return gson.toJson(response);
+            var body = new Gson().fromJson(req.body(), Map.class);
+            var result = payOS.confirmWebhook((String) body.get("webhookUrl"));
+            return new Gson().toJson(Map.of("data", result, "error", 0, "message", "ok"));
         });
-
     }
 }
