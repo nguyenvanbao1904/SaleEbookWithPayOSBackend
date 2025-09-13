@@ -20,8 +20,7 @@ public class Server {
     static Gson gson = new Gson();
     public static void main(String[] args) {
         port(3030);
-        staticFiles.externalLocation(
-                Paths.get("public").toAbsolutePath().toString());
+        staticFiles.location("/public");
         Dotenv dotenv = Dotenv.load();
         String clientId = dotenv.get("PAYOS_CLIENT_ID");
         String apiKey = dotenv.get("PAYOS_API_KEY");
