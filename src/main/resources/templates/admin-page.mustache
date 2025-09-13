@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html>
+<head><title>Admin</title></head>
+<body>
+  <h1>Quản lý sách</h1>
+  <form method="post" action="/admin/update">
+    <input type="text" name="name" value="{{book.name}}">
+    <input type="text" name="description" value="{{book.description}}">
+    <input type="number" name="price" value="{{book.price}}">
+    <input type="text" name="image" value="{{book.image}}">
+    <button type="submit">Cập nhật</button>
+  </form>
+</body>
+</html>
