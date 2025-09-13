@@ -11,7 +11,6 @@ import vn.payos.PayOS;
 import vn.payos.type.CheckoutResponseData;
 import vn.payos.type.ItemData;
 import vn.payos.type.PaymentData;
-import io.github.cdimascio.dotenv.Dotenv;
 
 import static spark.Spark.*;
 
@@ -21,10 +20,9 @@ public class Server {
     public static void main(String[] args) {
         port(3030);
         staticFiles.location("/public");
-        Dotenv dotenv = Dotenv.load();
-        String clientId = dotenv.get("PAYOS_CLIENT_ID");
-        String apiKey = dotenv.get("PAYOS_API_KEY");
-        String checksumKey = dotenv.get("PAYOS_CHECKSUM_KEY");
+        String clientId = System.getenv("PAYOS_CLIENT_ID");
+        String apiKey = System.getenv("PAYOS_API_KEY");
+        String checksumKey = System.getenv("PAYOS_CHECKSUM_KEY");
 
         options("/*", (request, response) -> {
             String accessControlRequestHeaders = request.headers("Access-Control-Request-Headers");
