@@ -31,7 +31,7 @@ public class Server {
         PayOS payOS = new PayOS(clientId, apiKey, checksumKey);
 
         before((req, res) -> {
-            res.header("Access-Control-Allow-Origin", "http://localhost:3000");
+            res.header("Access-Control-Allow-Origin", "https://sale-ebook-with-pay-os-frontend.vercel.app/");
             res.header("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
             res.header("Access-Control-Allow-Headers", "Content-Type,Authorization");
         });
@@ -104,22 +104,14 @@ public class Server {
                 paymentMap = gson.fromJson(Files.readString(path), type);
             }
 
-            boolean isPaid = paymentMap.getOrDefault(orderId, false);
-
-            // Nếu chưa thanh toán trong JSON → fallback gọi PayOS
-            if(!isPaid) {
+            if (!paymentMap.getOrDefault(orderId, false)) {
                 var paymentInfo = payOS.getPaymentLinkInformation(Long.parseLong(orderId));
-                if("PAID".equals(paymentInfo.getStatus()))
-                {
-                    isPaid = true;
-                    paymentMap.put(orderId, true);
-                    Files.writeString(path, gson.toJson(paymentMap)); // update JSON
+                if (!"PAID".equals(paymentInfo.getStatus())) {
+                    res.status(403);
+                    return "Bạn chưa thanh toán, không thể tải PDF";
                 }
-            }
-
-            if(!isPaid) {
-                res.status(403);
-                return "Bạn chưa thanh toán, không thể tải PDF";
+                paymentMap.put(orderId, true);
+                Files.writeString(path, gson.toJson(paymentMap));
             }
 
             // Trả file PDF
