@@ -28,10 +28,11 @@ public class Server {
         String clientId = System.getenv("PAYOS_CLIENT_ID");
         String apiKey = System.getenv("PAYOS_API_KEY");
         String checksumKey = System.getenv("PAYOS_CHECKSUM_KEY");
+        String frontendUrl = System.getenv("FRONTEND_URL");
         PayOS payOS = new PayOS(clientId, apiKey, checksumKey);
 
         before((req, res) -> {
-            res.header("Access-Control-Allow-Origin", "https://sale-ebook-with-pay-os-frontend.vercel.app");
+            res.header("Access-Control-Allow-Origin", frontendUrl);
             res.header("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
             res.header("Access-Control-Allow-Headers", "Content-Type,Authorization");
         });
@@ -51,8 +52,8 @@ public class Server {
                     .orderCode(orderCode)
                     .amount(quantity * price)
                     .description("Thanh toán đơn hàng")
-                    .returnUrl("http://localhost:3000/success.html")
-                    .cancelUrl("http://localhost:3000/cancel.html")
+                    .returnUrl(frontendUrl + "/success.html")
+                    .cancelUrl(frontendUrl + "/cancel.html")
                     .item(item)
                     .build();
 
@@ -85,7 +86,6 @@ public class Server {
             Book book = bookService.readBook();
             return new Gson().toJson(book);
         });
-
 
         // Download PDF, chỉ khi thanh toán thành công
         get("/download", (req, res) -> {
