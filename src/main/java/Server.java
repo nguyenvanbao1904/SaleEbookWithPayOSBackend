@@ -1,5 +1,6 @@
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
+import com.google.gson.reflect.TypeToken;
 import model.Book;
 import service.BookService;
 import spark.ModelAndView;
@@ -9,6 +10,12 @@ import vn.payos.type.CheckoutResponseData;
 import vn.payos.type.ItemData;
 import vn.payos.type.PaymentData;
 
+import java.io.IOException;
+import java.lang.reflect.Type;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.HashMap;
 import java.util.Map;
 
 import static spark.Spark.*;
@@ -82,45 +89,81 @@ public class Server {
 
         // Download PDF, chỉ khi thanh toán thành công
         get("/download", (req, res) -> {
-            boolean isPaid = "true".equals(req.queryParams("paid"));
-            if (!isPaid) {
+            String orderId = req.queryParams("orderId");
+            if(orderId == null) {
+                res.status(400);
+                return "Missing orderId";
+            }
+
+            Gson gson = new Gson();
+            Path path = Paths.get("data/payments.json");
+            Map<String, Boolean> paymentMap = new HashMap<>();
+
+            if(Files.exists(path)) {
+                Type type = new TypeToken<Map<String, Boolean>>(){}.getType();
+                paymentMap = gson.fromJson(Files.readString(path), type);
+            }
+
+            boolean isPaid = paymentMap.getOrDefault(orderId, false);
+
+            // Nếu chưa thanh toán trong JSON → fallback gọi PayOS
+            if(!isPaid) {
+                var paymentInfo = payOS.getPaymentLinkInformation(Long.parseLong(orderId));
+                if("PAID".equals(paymentInfo.getStatus()))
+                {
+                    isPaid = true;
+                    paymentMap.put(orderId, true);
+                    Files.writeString(path, gson.toJson(paymentMap)); // update JSON
+                }
+            }
+
+            if(!isPaid) {
                 res.status(403);
                 return "Bạn chưa thanh toán, không thể tải PDF";
             }
 
+            // Trả file PDF
             res.type("application/pdf");
             res.header("Content-Disposition", "attachment; filename=ebook.pdf");
-            res.raw().getOutputStream().write(bookService.getPdfBytes());
-            return res.raw();
+
+            byte[] pdfBytes;
+            try {
+                pdfBytes = bookService.getPdfBytes();
+            } catch (IOException e) {
+                res.status(500);
+                return "PDF file not found";
+            }
+
+            try (var out = res.raw().getOutputStream()) {
+                out.write(pdfBytes);
+                out.flush();
+            }
+
+            return null;
         });
 
-        // Webhook PayOS
         post("/webhook", (req, res) -> {
-            res.type("application/json");
             Gson gson = new Gson();
-            try {
-                // Parse JSON từ body
-                JsonObject jsonBody = gson.fromJson(req.body(), JsonObject.class);
-                String webhookUrl = jsonBody.get("webhookUrl").getAsString();
+            Map<String, Boolean> paymentMap;
 
-                // Gọi PayOS confirmWebhook
-                var result = payOS.confirmWebhook(webhookUrl);
-
-                // Trả về JSON giống Spring
-                JsonObject response = new JsonObject();
-                response.add("data", gson.toJsonTree(result));
-                response.addProperty("error", 0);
-                response.addProperty("message", "ok");
-
-                return gson.toJson(response);
-            } catch (Exception e) {
-                JsonObject response = new JsonObject();
-                response.add("data", null);
-                response.addProperty("error", -1);
-                response.addProperty("message", e.getMessage());
-                e.printStackTrace();
-                return gson.toJson(response);
+            Path path = Paths.get("data/payments.json");
+            if(Files.exists(path)) {
+                Type type = new TypeToken<Map<String, Boolean>>(){}.getType();
+                paymentMap = gson.fromJson(Files.readString(path), type);
+            } else {
+                paymentMap = new HashMap<>();
             }
+
+            JsonObject jsonBody = gson.fromJson(req.body(), JsonObject.class);
+            String orderId = jsonBody.get("orderId").getAsString();
+            String status = jsonBody.get("status").getAsString();
+
+            if("PAID".equals(status)) {
+                paymentMap.put(orderId, true);
+            }
+            Files.writeString(path, gson.toJson(paymentMap));
+            res.type("application/json");
+            return gson.toJson(Map.of("error", 0, "message", "ok"));
         });
     }
 }
