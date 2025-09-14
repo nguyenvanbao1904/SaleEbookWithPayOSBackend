@@ -1,4 +1,5 @@
 import com.google.gson.Gson;
+import com.google.gson.JsonObject;
 import model.Book;
 import service.BookService;
 import spark.ModelAndView;
@@ -95,9 +96,31 @@ public class Server {
 
         // Webhook PayOS
         post("/webhook", (req, res) -> {
-            var body = new Gson().fromJson(req.body(), Map.class);
-            var result = payOS.confirmWebhook((String) body.get("webhookUrl"));
-            return new Gson().toJson(Map.of("data", result, "error", 0, "message", "ok"));
+            res.type("application/json");
+            Gson gson = new Gson();
+            try {
+                // Parse JSON từ body
+                JsonObject jsonBody = gson.fromJson(req.body(), JsonObject.class);
+                String webhookUrl = jsonBody.get("webhookUrl").getAsString();
+
+                // Gọi PayOS confirmWebhook
+                var result = payOS.confirmWebhook(webhookUrl);
+
+                // Trả về JSON giống Spring
+                JsonObject response = new JsonObject();
+                response.add("data", gson.toJsonTree(result));
+                response.addProperty("error", 0);
+                response.addProperty("message", "ok");
+
+                return gson.toJson(response);
+            } catch (Exception e) {
+                JsonObject response = new JsonObject();
+                response.add("data", null);
+                response.addProperty("error", -1);
+                response.addProperty("message", e.getMessage());
+                e.printStackTrace();
+                return gson.toJson(response);
+            }
         });
     }
 }
